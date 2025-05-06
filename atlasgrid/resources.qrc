@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/atlasgrid" >
+        <file>atlasgrid.png</file>
+    </qresource>
+</RCC>
