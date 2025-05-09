@@ -244,9 +244,7 @@ class AtlasGrid:
         gridLayer.startEditing()
 
         # generate the net
-        #while y >= extent.yMinimum():
         for i in range(0,self.dlg.nRowsAndCols[0]):
-            #while x < extent.xMaximum():
             for j in range(0,self.dlg.nRowsAndCols[1]):
                 rectangle = QgsRectangle(x, y, x + rwDim[0], y + rwDim[1])
                 cellname = "{}{}{}".format(prefix,colname,str(rownum))
@@ -269,6 +267,7 @@ class AtlasGrid:
             y -= rwDim[1]
             rownum += 1
             colname = 'A'
+            prefix = ''
 
         gridLayer.commitChanges()
 
