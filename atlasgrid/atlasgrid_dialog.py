@@ -27,7 +27,7 @@ import os
 from qgis.PyQt.QtWidgets import QMessageBox, QDialogButtonBox
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
-from qgis.core import QgsProject, QgsLayoutItemRegistry, QgsUnitTypes, QgsVector, QgsRectangle #, QgsCoordinateReferenceSystem
+from qgis.core import Qgis, QgsProject, QgsLayoutItemRegistry, QgsUnitTypes, QgsVector, QgsRectangle, QgsMessageLog, QgsDistanceArea, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, QgsCoordinateTransformContext
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
@@ -57,6 +57,7 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
         self.cmb_PrintLayouts.currentIndexChanged.connect(self.loadMapItems)
         self.cmb_MapItems.currentIndexChanged.connect(self.setInfo)
         self.mExtentGroupBox.extentChanged.connect(self.setExtentInfo)
+        self.cmbCrsSelection.crsChanged.connect(self.setOutputCrs)
 
     def showEvent(self, event):
         super(AtlasGridDialog, self).showEvent(event)
@@ -115,8 +116,18 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
                 
                 # Calculate rwExtent, row and column number
                 extent = self.mExtentGroupBox.outputExtent()
-                rwHeight = atlasCellSize.height() * mapScale / 1000
-                rwWidth = atlasCellSize.width() * mapScale / 1000
+                
+                # Create a measurement converter
+                converter = QgsLayoutMeasurementConverter()
+
+                # Convert dimensions to meters
+                width_map_units = converter.convert(QgsLayoutMeasurement(atlasCellSize.width(), atlasCellSize.units()), Qgis.LayoutUnit.Meters).length()
+                height_map_units = converter.convert(QgsLayoutMeasurement(atlasCellSize.height(), atlasCellSize.units()), Qgis.LayoutUnit.Meters).length()
+
+                # Calculate the real-world dimensions
+                rwWidth = width_map_units * mapScale
+                rwHeight = height_map_units * mapScale
+
                 self.rwDimensions = (rwWidth,rwHeight)
                 rows = int(extent.height() / rwHeight) + 1
                 cols = int(extent.width() / rwWidth) + 1
@@ -141,3 +152,13 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
 
         return
         
+    def setOutputCrs(self):
+        self.mExtentGroupBox.setOutputCrs(self.cmbCrsSelection.crs())
+
+    def convertDistance(self, crs, destUnit, dist):
+        # Create an instance of QgsDistanceArea
+        distance_area = QgsDistanceArea()
+        distance_area.setSourceCrs(crs,QgsCoordinateTransformContext())
+
+        # Convert distance
+        return distance_area.convertLengthMeasurement(dist, destUnit)
