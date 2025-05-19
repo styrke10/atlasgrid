@@ -63,6 +63,7 @@ class AtlasGrid:
         # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&AtlasGrid')
+        
 
         # Check if plugin was started the first time in current QGIS session
         # Must be set in initGui() to survive plugin reloads
@@ -189,6 +190,10 @@ class AtlasGrid:
         if self.first_start == True:
             self.first_start = False
             self.dlg = AtlasGridDialog()
+            # Set default CRS and extent
+            mapCanvas = self.iface.mapCanvas()
+            self.dlg.mExtentGroupBox.setOriginalExtent(mapCanvas.extent(),mapCanvas.mapSettings().destinationCrs())
+            self.dlg.cmbCrsSelection.setCrs(mapCanvas.mapSettings().destinationCrs())
 
         # show the dialog
         self.dlg.show()
@@ -215,7 +220,7 @@ class AtlasGrid:
             
     def createGrid(self):
         # create layer
-        gridLayer = QgsVectorLayer("Polygon?crs=epsg:25832", 'AtlasGrid', "memory")
+        gridLayer = QgsVectorLayer("Polygon?crs={}".format(self.dlg.cmbCrsSelection.crs().authid()), 'AtlasGrid', "memory")
 
         QgsProject.instance().addMapLayer(gridLayer)
 
@@ -228,13 +233,7 @@ class AtlasGrid:
         extent = self.dlg.gridExtent
         rwDim = self.dlg.rwDimensions
 
-        # calculate bounding box for grid
-        # xStart = int(extent.xMinimum() / netSize) * netSize
-        # xEnd = (int(extent.xMaximum() / netSize) + 1) * netSize
-        # yStart = int(extent.yMinimum() / netSize) * netSize
-        # yEnd = (int(extent.yMaximum() / netSize) + 1) * netSize
-        # print "BBox: ", xStart, yStart, xEnd, yEnd
-
+        # calculate start rectangle as upper leftmost rectangle
         x = extent.xMinimum()
         y = extent.yMaximum() - rwDim[1]
         prefix = ''
