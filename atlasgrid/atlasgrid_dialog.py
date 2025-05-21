@@ -28,6 +28,7 @@ from qgis.PyQt.QtWidgets import QMessageBox, QDialogButtonBox
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 from qgis.core import Qgis, QgsProject, QgsLayoutItemRegistry, QgsUnitTypes, QgsVector, QgsRectangle, QgsMessageLog, QgsDistanceArea, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, QgsCoordinateTransformContext
+from qgsmaplayercombobox import QgsMapLayerComboBox
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(

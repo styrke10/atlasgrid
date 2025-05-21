@@ -229,6 +229,12 @@
     </item>
     <item row="0" column="1">
      <widget class="QLabel" name="label_3">
+      <property name="font">
+       <font>
+        <weight>75</weight>
+        <bold>true</bold>
+       </font>
+      </property>
       <property name="text">
        <string>Overlap</string>
       </property>
@@ -261,11 +267,7 @@
      </widget>
     </item>
     <item>
-     <widget class="QgsMapLayerComboBox" name="cmbAOILayer">
-      <property name="filters">
-       <set>Qgis::HasGeometry|Qgis::LineLayer|Qgis::PluginLayer|Qgis::PointCloudLayer|Qgis::PointLayer|Qgis::PolygonLayer</set>
-      </property>
-     </widget>
+     <widget class="QgsMapLayerComboBox" name="mMapLayerComboBox"/>
     </item>
    </layout>
   </widget>
