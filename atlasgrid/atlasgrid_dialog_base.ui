@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>455</width>
-    <height>404</height>
+    <height>535</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -17,7 +17,7 @@
    <property name="geometry">
     <rect>
      <x>20</x>
-     <y>370</y>
+     <y>498</y>
      <width>411</width>
      <height>32</height>
     </rect>
@@ -33,7 +33,7 @@
    <property name="geometry">
     <rect>
      <x>20</x>
-     <y>75</y>
+     <y>203</y>
      <width>411</width>
      <height>171</height>
     </rect>
@@ -43,7 +43,7 @@
    <property name="geometry">
     <rect>
      <x>20</x>
-     <y>290</y>
+     <y>418</y>
      <width>411</width>
      <height>80</height>
     </rect>
@@ -156,7 +156,7 @@
    <property name="geometry">
     <rect>
      <x>20</x>
-     <y>375</y>
+     <y>503</y>
      <width>151</width>
      <height>21</height>
     </rect>
@@ -172,7 +172,7 @@
    <property name="geometry">
     <rect>
      <x>20</x>
-     <y>252</y>
+     <y>380</y>
      <width>411</width>
      <height>31</height>
     </rect>
@@ -190,6 +190,104 @@
     </item>
    </layout>
   </widget>
+  <widget class="QWidget" name="gridLayoutWidget_3">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>80</y>
+     <width>411</width>
+     <height>51</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout_3">
+    <item row="1" column="5">
+     <widget class="QSpinBox" name="vertOverlap"/>
+    </item>
+    <item row="1" column="1">
+     <widget class="QLabel" name="label_9">
+      <property name="text">
+       <string>Horizontal overlap:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="4">
+     <widget class="QLabel" name="label_10">
+      <property name="text">
+       <string>Vertical overlap:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="3">
+     <widget class="QLabel" name="label_11">
+      <property name="text">
+       <string>%</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="2">
+     <widget class="QSpinBox" name="horizOverlap"/>
+    </item>
+    <item row="0" column="1">
+     <widget class="QLabel" name="label_3">
+      <property name="text">
+       <string>Overlap</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="6">
+     <widget class="QLabel" name="label_12">
+      <property name="text">
+       <string>%</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="verticalLayoutWidget">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>140</y>
+     <width>411</width>
+     <height>24</height>
+    </rect>
+   </property>
+   <layout class="QHBoxLayout" name="horizontalLayout_2">
+    <item>
+     <widget class="QLabel" name="label_13">
+      <property name="text">
+       <string>Layer with area of interest:</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QgsMapLayerComboBox" name="cmbAOILayer">
+      <property name="filters">
+       <set>Qgis::HasGeometry|Qgis::LineLayer|Qgis::PluginLayer|Qgis::PointCloudLayer|Qgis::PointLayer|Qgis::PolygonLayer</set>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="horizontalLayoutWidget_2">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>172</y>
+     <width>286</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <layout class="QHBoxLayout" name="horizontalLayout_3">
+    <item>
+     <widget class="QCheckBox" name="chkboxDeleteNonIntersecting">
+      <property name="text">
+       <string>Delete mapsheets not intersecting the area of interest</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
  </widget>
  <customwidgets>
   <customwidget>
@@ -203,6 +301,11 @@
    <extends>QgsCollapsibleGroupBox</extends>
    <header>qgsextentgroupbox.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>QgsMapLayerComboBox</class>
+   <extends>QComboBox</extends>
+   <header>qgsmaplayercombobox.h</header>
   </customwidget>
   <customwidget>
    <class>QgsProjectionSelectionWidget</class>
