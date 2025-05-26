@@ -24,7 +24,8 @@
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QVariant
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
-from qgis.core import QgsProject, QgsVectorLayer, QgsFeature, QgsField, QgsRectangle, QgsGeometry
+from qgis.core import Qgis, QgsProject, QgsVectorLayer, QgsFeature, QgsFeatureRequest, QgsExpression, QgsField, QgsRectangle, QgsGeometry, QgsMessageLog
+from qgis import processing
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -226,7 +227,8 @@ class AtlasGrid:
 
         fieldName = 'cellname'
         field = QgsField(fieldName, QVariant.String)
-        gridLayer.dataProvider().addAttributes([field])
+        numfield = QgsField('cellnum', QVariant.Int)
+        gridLayer.dataProvider().addAttributes([field,numfield])
         gridLayer.updateFields()
 
         # get extent of the grid
@@ -252,7 +254,7 @@ class AtlasGrid:
                 feat.setGeometry(QgsGeometry.fromRect(rectangle))
                 gridLayer.dataProvider().addFeatures([feat])
 
-                x += rwDim[0]
+                x += rwDim[2]
                 if colname < 'Z':
                     colname = chr(ord(colname)+1)
                 else:
@@ -263,12 +265,93 @@ class AtlasGrid:
                     colname = 'A'
 
             x = extent.xMinimum()
-            y -= rwDim[1]
+            y -= rwDim[3]
             rownum += 1
             colname = 'A'
             prefix = ''
 
+        # Check for non-intersecting cells if user has chosen to do so
+        if self.dlg.chkboxDeleteNonIntersecting.isChecked():
+            toBeDeleted = self.deleteNonIntersecting(gridLayer)
+        else:
+            toBeDeleted = []
+        
+        # Delete cells not intersecting and number the remaining
+        n = 0
+        for f in gridLayer.getFeatures():
+            if f["cellname"] in toBeDeleted:
+                gridLayer.deleteFeature(f.id())
+            else:
+                n += 1
+                f["cellnum"] = n
+                gridLayer.updateFeature(f)
+
         gridLayer.commitChanges()
 
+
+    def deleteNonIntersecting(self,grid):
+        # Generate line layer from grid polygons
+        lines = processing.run("native:polygonstolines", {'INPUT':grid,'OUTPUT':'TEMPORARY_OUTPUT'})['OUTPUT']
+        
+        # Split polygons by lines
+        split = processing.run('native:splitwithlines', {'INPUT':grid,'LINES':lines, 'OUTPUT':'TEMPORARY_OUTPUT'})['OUTPUT']
+
+        # Add the split layer temporarily to the project (to be able to reference it in a field calculator expression)
+        QgsProject.instance().addMapLayer(split, addToLegend=False)
+        split.setName('split')
+        splitToDelete = split
+
+        # Use field calculator to determine which cells overlap each other
+        alg_params = {
+            'FIELD_LENGTH': 20,
+            'FIELD_NAME': 'overlaps',
+            'FIELD_PRECISION': 0,
+            'FIELD_TYPE': 2,  # Text
+            'FORMULA': "array_to_string(array_sort( aggregate( layer:= '{}', aggregate:='array_agg', expression:=cellname, filter:=contains($geometry, geometry(@parent)))))".format(split.name()),
+            'INPUT': split,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+        split = processing.run('native:fieldcalculator', alg_params)['OUTPUT']
+
+        # Use field calculator to determine which cells to keep initially
+        aoiLayer = self.dlg.cmbAOILayer.currentLayer()
+        alg_params = {
+            'FIELD_LENGTH': 0,
+            'FIELD_NAME': 'keep',
+            'FIELD_PRECISION': 0,
+            'FIELD_TYPE': 6,  # Boolean
+            'FORMULA': "aggregate( layer:= '{}', aggregate:='count', expression:=@id, filter:=intersects($geometry, geometry(@parent))) > 0".format(aoiLayer.name()),
+            'INPUT': split,
+            'OUTPUT': 'TEMPORARY_OUTPUT'
+        }
+        split = processing.run('native:fieldcalculator', alg_params)['OUTPUT']
+
+        # Check for intersection in the overlaps
+        split.startEditing()
+        for f in split.getFeatures():
+            overlaps = f["overlaps"].split(',') if f["overlaps"] else []
+            if f["keep"] and len(overlaps)>1:
+                str = "cellname in ({}) and cellname = overlaps".format(','.join("'{}'".format(o) for o in overlaps))
+                request = QgsFeatureRequest(QgsExpression(str))
+                alreadyKept = False
+                for o in split.getFeatures(request):
+                    if o["keep"]:
+                        alreadyKept = True
+                
+                if not alreadyKept:
+                    o["keep"] = True
+                    split.updateFeature(o)
+                    
+        split.commitChanges()
+
+        str = "cellname = overlaps and not keep"
+        request = QgsFeatureRequest(QgsExpression(str))
+        toBeDeleted = []
+        for f in split.getFeatures(request):
+            toBeDeleted.append(f["cellname"])
             
+        # Remove the temporary layer again
+        QgsProject.instance().removeMapLayer(splitToDelete)
+        
+        return toBeDeleted
 

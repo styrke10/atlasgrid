@@ -201,7 +201,11 @@
    </property>
    <layout class="QGridLayout" name="gridLayout_3">
     <item row="1" column="5">
-     <widget class="QSpinBox" name="vertOverlap"/>
+     <widget class="QSpinBox" name="vertOverlap">
+      <property name="maximum">
+       <number>50</number>
+      </property>
+     </widget>
     </item>
     <item row="1" column="1">
      <widget class="QLabel" name="label_9">
@@ -225,7 +229,11 @@
      </widget>
     </item>
     <item row="1" column="2">
-     <widget class="QSpinBox" name="horizOverlap"/>
+     <widget class="QSpinBox" name="horizOverlap">
+      <property name="maximum">
+       <number>50</number>
+      </property>
+     </widget>
     </item>
     <item row="0" column="1">
      <widget class="QLabel" name="label_3">
@@ -267,7 +275,7 @@
      </widget>
     </item>
     <item>
-     <widget class="QgsMapLayerComboBox" name="mMapLayerComboBox"/>
+     <widget class="QgsMapLayerComboBox" name="cmbAOILayer"/>
     </item>
    </layout>
   </widget>
@@ -315,6 +323,20 @@
    <header>qgsprojectionselectionwidget.h</header>
   </customwidget>
  </customwidgets>
+ <tabstops>
+  <tabstop>cmb_PrintLayouts</tabstop>
+  <tabstop>cmb_MapItems</tabstop>
+  <tabstop>horizOverlap</tabstop>
+  <tabstop>vertOverlap</tabstop>
+  <tabstop>cmbAOILayer</tabstop>
+  <tabstop>chkboxDeleteNonIntersecting</tabstop>
+  <tabstop>mExtentGroupBox</tabstop>
+  <tabstop>cmbCrsSelection</tabstop>
+  <tabstop>infoMapScale</tabstop>
+  <tabstop>infoCellSize</tabstop>
+  <tabstop>infoRows</tabstop>
+  <tabstop>infoCols</tabstop>
+ </tabstops>
  <resources/>
  <connections>
   <connection>
