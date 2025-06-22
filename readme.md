@@ -15,6 +15,8 @@ To do this, you need a polygon layer with rectangular polygons sized to match th
 
 With the plugin, all calculations and polygon creation are handled automatically.
 
+Before using the plugin you should create the layout and the map item, that you want to use for your atlas.
+
 As shown in the illustration below, when you activate the plugin, a dialog appears where you can select the print layout and the map item that should display your map sheets. You can also specify an overlap if desired. 
 
 If you only want to create map sheets that cover a specific area of interest (and not the entire rectangular extent), you choose the layer containing your AoI and check the **Delete** checkbox.
