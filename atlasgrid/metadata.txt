@@ -7,7 +7,7 @@
 name=AtlasGrid
 qgisMinimumVersion=3.30
 description=This plugin can be used for creating a regular coverage grid for atlas plots
-version=1.1.0
+version=2.0.0
 author=Morten Storm, Styrke 10 ApS
 email=morten@styrke10.dk
 
@@ -21,7 +21,12 @@ repository=https://github.com/styrke10/atlasgrid
 
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-# changelog=Enhanced CRS handling added
+changelog=V. 2.0.0:
+    Overlaps implemented.
+    Removal of mapsheets not within AOI.
+    Implemented as processing plugin as well as standard plugin with GUI.
+    V. 1.1.0:
+    CRS handling enhanced.
 
 # Tags are comma separated with spaces allowed
 tags=python,print layout,atlas print
@@ -40,8 +45,8 @@ deprecated=False
 # Check the documentation for more information.
 # plugin_dependencies=
 
-Category of the plugin: Raster, Vector, Database or Web
-# category=
+# Category of the plugin: Raster, Vector, Database or Web
+#category=Vector
 
 # If the plugin can run on QGIS Server.
 server=False

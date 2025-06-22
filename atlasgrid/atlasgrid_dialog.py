@@ -27,8 +27,7 @@ import os
 from qgis.PyQt.QtWidgets import QMessageBox, QDialogButtonBox
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
-from qgis.core import Qgis, QgsProject, QgsLayoutItemRegistry, QgsUnitTypes, QgsVector, QgsRectangle, QgsDistanceArea, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, QgsCoordinateTransformContext
-#from qgis.gui import QgsMapLayerComboBox, QgsMapLayerProxyModel
+from qgis.core import Qgis, QgsProject, QgsLayoutItemRegistry, QgsUnitTypes, QgsVector, QgsRectangle, QgsLayoutMeasurement
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
@@ -52,8 +51,10 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
         self.rwDimensions = None
         self.nRowsAndCols = None
         self.gridExtent = None
+        self.mapScale = 0
         self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
         self.cmbAOILayer.setFilters(Qgis.LayerFilter.VectorLayer)
+        self.gridCreator = None
                     
         # Connect the file changed signal to the enable button slot
         self.cmb_PrintLayouts.currentIndexChanged.connect(self.loadMapItems)
@@ -62,6 +63,9 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
         self.horizOverlap.valueChanged.connect(self.setExtentInfo)
         self.vertOverlap.valueChanged.connect(self.setExtentInfo)
         self.cmbCrsSelection.crsChanged.connect(self.setOutputCrs)
+        
+    def setGC(self, gc):
+        self.gridCreator = gc
 
     def showEvent(self, event):
         super(AtlasGridDialog, self).showEvent(event)
@@ -89,19 +93,22 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
         return
 
     def setExtentInfo(self):
-        self.extentSet = True
-        self.setInfo()
+##
+        if not self.mExtentGroupBox.outputExtent().isEmpty():
+            self.extentSet = True
+            self.setInfo()
         return
         
     def setInfo(self):
         mapFound = False
         for item in self.maplist:
             if item[0] == self.cmb_PrintLayouts.currentText() and item[1] == self.cmb_MapItems.currentText():
-                mapScale = item[2]
+                self.mapScale = item[2]
                 atlasCellSize = item[3]
                 mapFound = True
 
         if mapFound and self.extentSet:
+            extent = self.mExtentGroupBox.outputExtent()
             if QgsUnitTypes.toAbbreviatedString(atlasCellSize.units()) != 'mm':
                 msgBox = QMessageBox()
                 msgBox.setIcon(QMessageBox.Icon.Warning)
@@ -114,39 +121,32 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.infoRows.setText("")
                 self.infoCols.setText("")
                 self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
+##
+            elif extent.isEmpty():
+                msgBox = QMessageBox()
+                msgBox.setIcon(QMessageBox.Icon.Warning)
+                msgBox.setWindowTitle("Warning")
+                msgBox.setText("Extent not correctly set!")
+                msgBox.setStandardButtons(QMessageBox.StandardButton.Ok)
+                msgBox.exec()
+                self.infoMapScale.setText("")
+                self.infoCellSize.setText("")
+                self.infoRows.setText("")
+                self.infoCols.setText("")
+                self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
             else:
-                self.infoMapScale.setText("1:{:n}".format(int(round(mapScale,0))))
+                self.infoMapScale.setText("1:{:n}".format(int(round(self.mapScale,0))))
                 self.infoCellSize.setText("{:.2f} x {:.2f} {}".format(atlasCellSize.width(),atlasCellSize.height(),QgsUnitTypes.toAbbreviatedString(atlasCellSize.units())))
                 
                 # Calculate rwExtent, row and column number
-                extent = self.mExtentGroupBox.outputExtent()
+                (rwDimensions,nRowsAndCols,gridExtent) = self.gridCreator.calcGridMetrics(self.mapScale,extent,atlasCellSize,self.horizOverlap.value(),self.vertOverlap.value())
+
+                self.rwDimensions = rwDimensions
+                self.nRowsAndCols = nRowsAndCols
+                self.infoCols.setText(str(nRowsAndCols[1]))
+                self.infoRows.setText(str(nRowsAndCols[0]))
                 
-                # Create a measurement converter
-                converter = QgsLayoutMeasurementConverter()
-
-                # Convert dimensions to meters
-                width_map_units = converter.convert(QgsLayoutMeasurement(atlasCellSize.width(), atlasCellSize.units()), Qgis.LayoutUnit.Meters).length()
-                height_map_units = converter.convert(QgsLayoutMeasurement(atlasCellSize.height(), atlasCellSize.units()), Qgis.LayoutUnit.Meters).length()
-
-                # Calculate the real-world dimensions
-                rwWidth = width_map_units * mapScale
-                rwHeight = height_map_units * mapScale
-                rwWidthNet = width_map_units * ((100-self.horizOverlap.value())/100) * mapScale
-                rwHeightNet = height_map_units * ((100-self.vertOverlap.value())/100) * mapScale
-
-                self.rwDimensions = (rwWidth,rwHeight,rwWidthNet,rwHeightNet)
-                #cols = int(extent.width() / rwWidth) + 1
-                cols = int((extent.width()-rwWidth) / rwWidthNet) + 2 #if extent.width() > rwWidth else 1
-                #rows = int(extent.height() / rwHeight) + 1
-                rows = int((extent.height()-rwHeight) / rwHeightNet) + 2
-                self.nRowsAndCols = (rows,cols)
-                self.infoCols.setText(str(cols))
-                self.infoRows.setText(str(rows))
-                
-                # Adjust extent
-                adjustX = -(rwWidth + (cols-1) * rwWidthNet - extent.width()) / 2
-                adjustY = (rwHeight + (rows-1) * rwHeightNet - extent.height()) / 2
-                self.gridExtent = extent + QgsVector(adjustX, adjustY)
+                self.gridExtent = gridExtent
 
                 # Enable the OK button
                 self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
@@ -162,3 +162,5 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
         
     def setOutputCrs(self):
         self.mExtentGroupBox.setOutputCrs(self.cmbCrsSelection.crs())
+        self.gridCreator.setCRS(self.cmbCrsSelection.crs().authid())
+

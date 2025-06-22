@@ -38,13 +38,15 @@ LOCALES =
 # translation
 SOURCES = \
 	__init__.py \
-	atlasgrid.py atlasgrid_dialog.py
+	atlasgrid.py atlasgrid_dialog.py grid.py \
+	 .processing/__init__.py .processing/atlasgrid_algorithm.py .processing/atlasgrid_provider.py
 
 PLUGINNAME = atlasgrid
 
 PY_FILES = \
 	__init__.py \
-	atlasgrid.py atlasgrid_dialog.py
+	atlasgrid.py atlasgrid_dialog.py grid.py \
+	 .processing/__init__.py .processing/atlasgrid_algorithm.py .processing/atlasgrid_provider.py
 
 UI_FILES = atlasgrid_dialog_base.ui
 

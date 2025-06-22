@@ -21,17 +21,20 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QVariant
+import os.path
+from qgis.PyQt.QtCore import Qt, QSettings, QTranslator, QCoreApplication
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
-from qgis.core import Qgis, QgsProject, QgsVectorLayer, QgsFeature, QgsFeatureRequest, QgsExpression, QgsField, QgsRectangle, QgsGeometry, QgsMessageLog
+from qgis.PyQt.QtWidgets import QAction, QApplication
+from qgis.core import Qgis, QgsApplication, QgsProject, QgsFeature
 from qgis import processing
+from .grid import GridCreator
 
-# Initialize Qt resources from file resources.py
-from .resources import *
+# Import the code for the processing plugin
+from .atlasgrid_provider import AtlasGridProvider
 # Import the code for the dialog
 from .atlasgrid_dialog import AtlasGridDialog
-import os.path
+# Initialize Qt resources from file resources.py
+from .resources import *
 
 
 class AtlasGrid:
@@ -45,6 +48,9 @@ class AtlasGrid:
             application at run time.
         :type iface: QgsInterface
         """
+        # Create provider
+        self.provider = AtlasGridProvider()
+
         # Save reference to the QGIS interface
         self.iface = iface
         # initialize plugin directory
@@ -161,8 +167,10 @@ class AtlasGrid:
         return action
 
     def initGui(self):
-        """Create the menu entries and toolbar icons inside the QGIS GUI."""
+        # Add provider
+        QgsApplication.processingRegistry().addProvider(self.provider)
 
+        """Create the menu entries and toolbar icons inside the QGIS GUI."""
         icon_path = ':/plugins/atlasgrid/atlasgrid.png'
         self.add_action(
             icon_path,
@@ -173,8 +181,11 @@ class AtlasGrid:
         # will be set False in run()
         self.first_start = True
 
+    def initProcessing(self):
+        QgsApplication.processingRegistry().addProvider(self.provider)
 
     def unload(self):
+        QgsApplication.processingRegistry().removeProvider(self.provider)
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
             self.iface.removePluginMenu(
@@ -191,167 +202,27 @@ class AtlasGrid:
         if self.first_start == True:
             self.first_start = False
             self.dlg = AtlasGridDialog()
-            # Set default CRS and extent
+            self.dlg.setModal(True)
+            self.gridCreator = GridCreator()
+            self.dlg.setGC(self.gridCreator)
+            # Set default CRS and extent and initialize the GridCreator object
             mapCanvas = self.iface.mapCanvas()
             self.dlg.mExtentGroupBox.setOriginalExtent(mapCanvas.extent(),mapCanvas.mapSettings().destinationCrs())
             self.dlg.cmbCrsSelection.setCrs(mapCanvas.mapSettings().destinationCrs())
+            self.gridCreator.setCRS(self.dlg.cmbCrsSelection.crs().authid())
 
         # show the dialog
-        self.dlg.show()
+        self.dlg.show()   #exec_()   #show()
         # Run the dialog event loop
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
-            layout = self.dlg.cmb_PrintLayouts.currentText()
-            map = self.dlg.cmb_MapItems.currentText()
-            extent = self.dlg.mExtentGroupBox.outputExtent()
-            self.rwDimension = None
-            self.nRowsAndCols = None
+            try:
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                gridLayer = self.gridCreator.createGrid(self.dlg.mapScale,self.dlg.gridExtent,self.dlg.rwDimensions,self.dlg.nRowsAndCols,self.dlg.chkboxDeleteNonIntersecting.isChecked(),self.dlg.cmbAOILayer.currentLayer())
+                QgsProject.instance().addMapLayer(gridLayer)
 
-            
-            for item in self.dlg.maplist:
-                if item[0] == layout and item[1] == map:
-                    mapScale = item[2]
-                    mapsheetExtent = item[3]
-            
-            self.createGrid()
+            finally:
+                QApplication.restoreOverrideCursor()
             
             
-    def createGrid(self):
-        # create layer
-        gridLayer = QgsVectorLayer("Polygon?crs={}".format(self.dlg.cmbCrsSelection.crs().authid()), 'AtlasGrid', "memory")
-
-        QgsProject.instance().addMapLayer(gridLayer)
-
-        fieldName = 'cellname'
-        field = QgsField(fieldName, QVariant.String)
-        numfield = QgsField('cellnum', QVariant.Int)
-        gridLayer.dataProvider().addAttributes([field,numfield])
-        gridLayer.updateFields()
-
-        # get extent of the grid
-        extent = self.dlg.gridExtent
-        rwDim = self.dlg.rwDimensions
-
-        # calculate start rectangle as upper leftmost rectangle
-        x = extent.xMinimum()
-        y = extent.yMaximum() - rwDim[1]
-        prefix = ''
-        colname = 'A'
-        rownum = 1
-
-        gridLayer.startEditing()
-
-        # generate the net
-        for i in range(0,self.dlg.nRowsAndCols[0]):
-            for j in range(0,self.dlg.nRowsAndCols[1]):
-                rectangle = QgsRectangle(x, y, x + rwDim[0], y + rwDim[1])
-                cellname = "{}{}{}".format(prefix,colname,str(rownum))
-                feat = QgsFeature(gridLayer.fields())
-                feat.setAttribute(fieldName, cellname)
-                feat.setGeometry(QgsGeometry.fromRect(rectangle))
-                gridLayer.dataProvider().addFeatures([feat])
-
-                x += rwDim[2]
-                if colname < 'Z':
-                    colname = chr(ord(colname)+1)
-                else:
-                    if prefix == '':
-                        prefix = 'A'
-                    else:
-                        prefix = chr(ord(prefix)+1)
-                    colname = 'A'
-
-            x = extent.xMinimum()
-            y -= rwDim[3]
-            rownum += 1
-            colname = 'A'
-            prefix = ''
-
-        # Check for non-intersecting cells if user has chosen to do so
-        if self.dlg.chkboxDeleteNonIntersecting.isChecked():
-            toBeDeleted = self.deleteNonIntersecting(gridLayer)
-        else:
-            toBeDeleted = []
-        
-        # Delete cells not intersecting and number the remaining
-        n = 0
-        for f in gridLayer.getFeatures():
-            if f["cellname"] in toBeDeleted:
-                gridLayer.deleteFeature(f.id())
-            else:
-                n += 1
-                f["cellnum"] = n
-                gridLayer.updateFeature(f)
-
-        gridLayer.commitChanges()
-
-
-    def deleteNonIntersecting(self,grid):
-        # Generate line layer from grid polygons
-        lines = processing.run("native:polygonstolines", {'INPUT':grid,'OUTPUT':'TEMPORARY_OUTPUT'})['OUTPUT']
-        
-        # Split polygons by lines
-        split = processing.run('native:splitwithlines', {'INPUT':grid,'LINES':lines, 'OUTPUT':'TEMPORARY_OUTPUT'})['OUTPUT']
-
-        # Add the split layer temporarily to the project (to be able to reference it in a field calculator expression)
-        QgsProject.instance().addMapLayer(split, addToLegend=False)
-        split.setName('split')
-        splitToDelete = split
-
-        # Use field calculator to determine which cells overlap each other
-        alg_params = {
-            'FIELD_LENGTH': 20,
-            'FIELD_NAME': 'overlaps',
-            'FIELD_PRECISION': 0,
-            'FIELD_TYPE': 2,  # Text
-            'FORMULA': "array_to_string(array_sort( aggregate( layer:= '{}', aggregate:='array_agg', expression:=cellname, filter:=contains($geometry, geometry(@parent)))))".format(split.name()),
-            'INPUT': split,
-            'OUTPUT': 'TEMPORARY_OUTPUT'
-        }
-        split = processing.run('native:fieldcalculator', alg_params)['OUTPUT']
-
-        # Use field calculator to determine which cells to keep initially
-        aoiLayer = self.dlg.cmbAOILayer.currentLayer()
-        alg_params = {
-            'FIELD_LENGTH': 0,
-            'FIELD_NAME': 'keep',
-            'FIELD_PRECISION': 0,
-            'FIELD_TYPE': 6,  # Boolean
-            'FORMULA': "aggregate( layer:= '{}', aggregate:='count', expression:=@id, filter:=intersects($geometry, geometry(@parent))) > 0".format(aoiLayer.name()),
-            'INPUT': split,
-            'OUTPUT': 'TEMPORARY_OUTPUT'
-        }
-        split = processing.run('native:fieldcalculator', alg_params)['OUTPUT']
-
-        # Check for intersection in the overlaps
-        split.startEditing()
-        for f in split.getFeatures():
-            overlaps = f["overlaps"].split(',') if f["overlaps"] else []
-            if f["keep"] and len(overlaps)>1:
-                str = "cellname in ({}) and cellname = overlaps".format(','.join("'{}'".format(o) for o in overlaps))
-                request = QgsFeatureRequest(QgsExpression(str))
-                alreadyKept = False
-                for o in split.getFeatures(request):
-                    if o["keep"]:
-                        alreadyKept = True
-                
-                if not alreadyKept:
-                    o["keep"] = True
-                    split.updateFeature(o)
-                    
-        split.commitChanges()
-
-        str = "cellname = overlaps and not keep"
-        request = QgsFeatureRequest(QgsExpression(str))
-        toBeDeleted = []
-        for f in split.getFeatures(request):
-            toBeDeleted.append(f["cellname"])
-            
-        # Remove the temporary layer again
-        QgsProject.instance().removeMapLayer(splitToDelete)
-        
-        return toBeDeleted
-
