@@ -4,7 +4,6 @@ from qgis.PyQt.QtCore import QVariant
 from qgis.core import Qgis, QgsProject, QgsVectorLayer, QgsFeature, QgsFeatureRequest, QgsExpression, QgsField, QgsRectangle, QgsGeometry, QgsVector, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, QgsCoordinateReferenceSystem
 from qgis import processing
 
-
 class GridCreator():
     feedback = None
     

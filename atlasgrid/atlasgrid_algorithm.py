@@ -2,7 +2,6 @@
 
 from PyQt5.QtGui import QIcon
 from qgis.core import (
-    QgsMessageLog, 
     QgsProcessingAlgorithm,
     QgsProcessingParameterVectorLayer,
     QgsProcessingParameterLayout,
@@ -13,7 +12,11 @@ from qgis.core import (
     QgsProcessingParameterCrs,
     QgsProcessingParameterFeatureSink,
     QgsFeatureSink,
-    QgsLayoutItemRegistry
+    QgsLayoutItemRegistry,
+    QgsRectangle,
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsProject
 )
 from qgis.utils import iface
 from .grid import GridCreator
@@ -84,13 +87,18 @@ class AtlasGridProcessingAlgorithm(QgsProcessingAlgorithm):
         vertOverlap = self.parameterAsInt(parameters, self.VERTOVERLAP, context)
         deleteNonIntersects = self.parameterAsBoolean(parameters, self.DELETENONINTERSECTS, context)
         aoiLayer = self.parameterAsVectorLayer(parameters, self.AOI, context)
-        extent = self.parameterAsExtent(parameters, self.EXTENT, context)
         crs = self.parameterAsCrs(parameters, self.CRS, context)
+        extent = self.parameterAsExtent(parameters, self.EXTENT, context)
+        
+        if aoiLayer.crs() != crs:
+            # Transform the extent
+            transform = QgsCoordinateTransform(aoiLayer.crs(), crs, QgsProject.instance())
+            extent = transform.transformBoundingBox(extent)
 
         gridCreator = GridCreator()
         # Set default CRS and extent and initialize the GridCreator object
-        gridCreator.setCRS(crs.authid())
         gridCreator.setFeedback(feedback)
+        gridCreator.setCRS(crs.authid())
         mapScale = mapitem.scale()
         atlasCellSize = mapitem.sizeWithUnits()
 
