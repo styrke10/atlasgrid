@@ -1,5 +1,7 @@
 # AtlasGrid v. 2.x
 
+Dansk version/Danish version: [AtlasGrid - til dig, der laver kortbladsopdelte atlas prints i QGIS - STYRKE 10](https://www.styrke10.dk/2025/05/08/atlasgrid-til-dig-der-laver-kortbladsopdelte-atlas-prints-i-qgis/)
+
 ## Purpose
 
 This plugin allows you to create a polygon layer consisting of evenly sized, rectangular polygons, suitable for use as a coverage layer in an atlas print layout.
