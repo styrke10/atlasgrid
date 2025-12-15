@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 from qgis.PyQt.QtCore import QVariant
-from qgis.core import Qgis, QgsProject, QgsVectorLayer, QgsFeature, QgsFeatureRequest, QgsExpression, QgsField, QgsRectangle, QgsGeometry, QgsVector, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, QgsCoordinateReferenceSystem
+from qgis.core import Qgis, QgsProject, QgsVectorLayer, QgsFeature, QgsFeatureRequest, QgsExpression, QgsMessageLog, \
+                      QgsField, QgsRectangle, QgsGeometry, QgsVector, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, QgsCoordinateReferenceSystem
 from qgis import processing
 
 class GridCreator():
@@ -57,7 +58,8 @@ class GridCreator():
         fieldName = 'cellname'
         field = QgsField(fieldName, QVariant.String)
         numfield = QgsField('cellnum', QVariant.Int)
-        gridLayer.dataProvider().addAttributes([field,numfield])
+        disjoint_numfield = QgsField('dj_cellnum', QVariant.Int)
+        gridLayer.dataProvider().addAttributes([field,numfield,disjoint_numfield])
         gridLayer.updateFields()
 
         # calculate start rectangle as upper leftmost rectangle
@@ -109,12 +111,76 @@ class GridCreator():
             else:
                 n += 1
                 f["cellnum"] = n
+                if not deleteNonIntersecting:   
+                    f["dj_cellnum"] = n
+
                 gridLayer.updateFeature(f)
 
         gridLayer.commitChanges()
+
+        # Calculate disjoint cell numbers
+        if deleteNonIntersecting:
+            self.calculateDisjointCellNums(gridLayer)
         
         return gridLayer
 
+    def calculateDisjointCellNums(self,grid):
+        QgsMessageLog.logMessage("Calculating disjoint cell numbers", "AtlasGrid", Qgis.Info)
+        # Dissolve grid to get disjoint polygons
+        alg_params = {'INPUT':grid,
+                      'FIELD':[],
+                      'SEPARATE_DISJOINT':True,
+                      'OUTPUT':'TEMPORARY_OUTPUT'
+                      }
+        merged = processing.run("native:dissolve", alg_params, feedback=self.feedback)['OUTPUT']
+
+        # Assign an ID to every disjoint polygon and calculate the min_x and max_y of the northwest corner - store this as tuples in a list
+        QgsMessageLog.logMessage("Assigning IDs to disjoint polygons", "AtlasGrid", Qgis.Info)
+        dj_areas = []
+        merged.startEditing()
+        for i, f in enumerate(merged.getFeatures()):
+            f['dj_cellnum'] = i+1
+
+            # Find northwest corner by looking for the minimum x at the maximum y of the polygon's boundary
+            min_x = 9999999999
+            max_y = -9999999999
+            geom = f.geometry() #.asMultiPolygon()
+            #QgsMessageLog.logMessage(f"Processing disjoint polygon {i+1} geometry {geom}", "AtlasGrid", Qgis.Info)
+            #boundary = geom.boundary()
+            for pt in geom.vertices():
+                if pt.y() > max_y:
+                    max_y = pt.y()
+                    min_x = pt.x()
+                elif pt.y() == max_y and pt.x() < min_x:
+                    min_x = pt.x()
+            dj_areas.append( (i+1, min_x, max_y) )
+            QgsMessageLog.logMessage("Disjoint polygon {}: min_x = {}, max_y = {}".format(i+1,min_x,max_y), "AtlasGrid", Qgis.Info)
+            merged.updateFeature(f)
+
+        merged.commitChanges()
+
+        # Sort the list by max_y (descending) and min_x (ascending)
+        dj_areas.sort(key=lambda x: (-x[2], x[1])) 
+
+        # Iterate the list, select grid cells within each disjoint polygon and assign the disjoint cell number according to the sorted order
+        cell_idx = 0
+        grid.startEditing()
+        for area in dj_areas:
+            str = "dj_cellnum = {}".format(area[0])
+            request = QgsFeatureRequest(QgsExpression(str))
+            for f in merged.getFeatures(request):
+                geom = f.geometry()
+                # Select grid cells within this geometry
+                str2 = "within($geometry, geom_from_wkt('{}'))".format(geom.asWkt())
+                request2 = QgsFeatureRequest(QgsExpression(str2))
+                for gf in grid.getFeatures(request2):
+                    cell_idx += 1
+                    gf['dj_cellnum'] = cell_idx
+                    grid.updateFeature(gf)
+
+        grid.commitChanges()
+
+        return
 
     def identifyCellsToDelete(self,grid,aoi):
         if self.feedback:
