@@ -52,7 +52,7 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
         self.nRowsAndCols = None
         self.gridExtent = None
         self.mapScale = 0
-        self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
+        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
         self.cmbAOILayer.setFilters(Qgis.LayerFilter.VectorLayer)
         self.gridCreator = None
                     
@@ -79,7 +79,7 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
         for layout in project.layoutManager().printLayouts():
             self.cmb_PrintLayouts.addItem(layout.name())
             for item in layout.items():
-                if item.type() == QgsLayoutItemRegistry.LayoutMap:
+                if item.type() == QgsLayoutItemRegistry.ItemType.LayoutMap:
                     self.maplist.append((layout.name(),item.displayName(),item.scale(),item.sizeWithUnits()))
         
         return
@@ -120,7 +120,7 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.infoCellSize.setText("")
                 self.infoRows.setText("")
                 self.infoCols.setText("")
-                self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
+                self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
 ##
             elif extent.isEmpty():
                 msgBox = QMessageBox()
@@ -133,7 +133,7 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.infoCellSize.setText("")
                 self.infoRows.setText("")
                 self.infoCols.setText("")
-                self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
+                self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
             else:
                 self.infoMapScale.setText("1:{:n}".format(int(round(self.mapScale,0))))
                 self.infoCellSize.setText("{:.2f} x {:.2f} {}".format(atlasCellSize.width(),atlasCellSize.height(),QgsUnitTypes.toAbbreviatedString(atlasCellSize.units())))
@@ -149,14 +149,14 @@ class AtlasGridDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.gridExtent = gridExtent
 
                 # Enable the OK button
-                self.button_box.button(QDialogButtonBox.Ok).setEnabled(True)
+                self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
             
         else:
             self.infoMapScale.setText("")
             self.infoCellSize.setText("")
             self.infoRows.setText("")
             self.infoCols.setText("")
-            self.button_box.button(QDialogButtonBox.Ok).setEnabled(False)
+            self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
 
         return
         

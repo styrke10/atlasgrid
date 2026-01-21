@@ -7,10 +7,9 @@
 name=AtlasGrid
 qgisMinimumVersion=3.30
 description=This plugin can be used for creating a regular coverage grid for atlas plots
-version=2.0.0
+version=2.1.0
 author=Morten Storm, Styrke 10 ApS
 email=morten@styrke10.dk
-
 about=When making atlas plots you will often be using a coverage layer consisting of regular (evenly sized) rectangles for dividing the atlas into pages. This plugin can be used for creating this kind of polygon layers based on the scale and physical size of the map item in a given print layout.
 
 tracker=https://github.com/styrke10/atlasgrid/issues
@@ -19,9 +18,13 @@ repository=https://github.com/styrke10/atlasgrid
 
 # Recommended items:
 
+supportsQt6=True
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-changelog=V. 2.0.0:
+changelog=V. 2.1.0:
+	Supports numbering of disjoint areas of interest
+	Is cross-version compatible (Qt5/Qt6)
+	V. 2.0.0:
     Overlaps implemented.
     Removal of mapsheets not within AOI.
     Implemented as processing plugin as well as standard plugin with GUI.

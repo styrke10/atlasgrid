@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from PyQt5.QtGui import QIcon
+from qgis.PyQt.QtGui import QIcon
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterVectorLayer,
@@ -13,8 +13,6 @@ from qgis.core import (
     QgsProcessingParameterFeatureSink,
     QgsFeatureSink,
     QgsLayoutItemRegistry,
-    QgsRectangle,
-    QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
     QgsProject
 )
@@ -43,12 +41,12 @@ class AtlasGridProcessingAlgorithm(QgsProcessingAlgorithm):
         )
         self.addParameter(
             QgsProcessingParameterLayoutItem(self.MAPITEM, 'Map Item',
-                itemType=QgsLayoutItemRegistry.LayoutMap,
+                itemType=QgsLayoutItemRegistry.ItemType.LayoutMap,
                 parentLayoutParameterName = self.LAYOUT)
         )
         self.addParameter(
             QgsProcessingParameterNumber(self.HORZOVERLAP, 'Horizontal overlap (in %)',
-                type=QgsProcessingParameterNumber.Integer,
+                type=QgsProcessingParameterNumber.Type.Integer,
                 defaultValue=0,
                 optional=False,
                 minValue=0,
@@ -56,7 +54,7 @@ class AtlasGridProcessingAlgorithm(QgsProcessingAlgorithm):
         )
         self.addParameter(
             QgsProcessingParameterNumber(self.VERTOVERLAP, 'Vertical overlap (in %)',
-                type=QgsProcessingParameterNumber.Integer,
+                type=QgsProcessingParameterNumber.Type.Integer,
                 defaultValue=0,
                 optional=False,
                 minValue=0,

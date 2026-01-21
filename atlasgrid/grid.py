@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 
-from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtCore import QVariant, QMetaType
 from qgis.core import Qgis, QgsProject, QgsVectorLayer, QgsFeature, QgsFeatureRequest, QgsExpression, QgsMessageLog, \
-                      QgsField, QgsRectangle, QgsGeometry, QgsVector, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, QgsCoordinateReferenceSystem
+                      QgsField, QgsRectangle, QgsGeometry, QgsVector, QgsLayoutMeasurement, QgsLayoutMeasurementConverter, \
+                      QgsCoordinateReferenceSystem, QgsProcessingFeatureSourceDefinition
+from qgis.core.additions.edit import edit
+from qgis.utils import iface
 from qgis import processing
 
 class GridCreator():
     feedback = None
+    crs = None
     
     def __init__(self):
         pass
@@ -17,10 +21,16 @@ class GridCreator():
     def setFeedback(self,feedback):
         self.feedback = feedback
         return
+
+    def logMessage(self,message,level=Qgis.MessageLevel.Info):
+        if self.feedback:
+            self.feedback.pushInfo(message)
+        else:
+            QgsMessageLog.logMessage(message, "AtlasGrid", level)
+        return
     
     def calcGridMetrics(self,mapScale,extent,atlasCellSize,horizOverlap,vertOverlap):
-        if self.feedback:
-            self.feedback.pushInfo("Calculating grid metrics")
+        self.logMessage("Calculating grid metrics")
         # Create a measurement converter
         converter = QgsLayoutMeasurementConverter()
 
@@ -47,10 +57,8 @@ class GridCreator():
         
         return (rwDimensions,nRowsAndCols,gridExtent)
 
-
     def createGrid(self,mapScale,extent,rwDim,nRowsAndCols,deleteNonIntersecting,aoiLayer):
-        if self.feedback:
-            self.feedback.pushInfo("Creating grid")
+        self.logMessage("Creating grid (v. 2.1.0)")
         
         # create layer
         gridLayer = QgsVectorLayer("Polygon?crs={}".format(self.crs), 'AtlasGrid', "memory")
@@ -120,91 +128,157 @@ class GridCreator():
 
         # Calculate disjoint cell numbers
         if deleteNonIntersecting:
-            self.calculateDisjointCellNums(gridLayer)
+            self.calculateDisjointCellNums(gridLayer,aoiLayer,rwDim)
         
         return gridLayer
 
-    def calculateDisjointCellNums(self,grid):
-        QgsMessageLog.logMessage("Calculating disjoint cell numbers", "AtlasGrid", Qgis.Info)
-        # Dissolve grid to get disjoint polygons
-        alg_params = {'INPUT':grid,
+    def calculateDisjointCellNums(self,grid,aoi,rwDim):
+        self.logMessage("Calculating disjoint cell numbers")
+        # Dissolve AOI keeping disjoints AOIs separate
+        alg_params = {'INPUT': aoi,
                       'FIELD':[],
                       'SEPARATE_DISJOINT':True,
                       'OUTPUT':'TEMPORARY_OUTPUT'
                       }
-        merged = processing.run("native:dissolve", alg_params, feedback=self.feedback)['OUTPUT']
+        merged_aois = processing.run("native:dissolve", alg_params)['OUTPUT']
+        merged_aois.setName('merged_aois')
 
-        # Assign an ID to every disjoint polygon and calculate the min_x and max_y of the northwest corner - store this as tuples in a list
-        QgsMessageLog.logMessage("Assigning IDs to disjoint polygons", "AtlasGrid", Qgis.Info)
-        dj_areas = []
-        merged.startEditing()
-        for i, f in enumerate(merged.getFeatures()):
-            f['dj_cellnum'] = i+1
+        # Add autoincremental field (unique ID)
+        alg_params = {
+            'INPUT': merged_aois,
+            'FIELD_NAME': 'uid',
+            'START': 1,
+            'GROUP_FIELDS': [],
+            'MODULUS': 0,
+            'OUTPUT': 'memory:'
+        }
+        merged_unique_aois = processing.run('native:addautoincrementalfield', alg_params)['OUTPUT']
+        merged_unique_aois.setName('merged_unique_aois')
 
-            # Find northwest corner by looking for the minimum x at the maximum y of the polygon's boundary
-            min_x = 9999999999
-            max_y = -9999999999
-            geom = f.geometry() #.asMultiPolygon()
-            #QgsMessageLog.logMessage(f"Processing disjoint polygon {i+1} geometry {geom}", "AtlasGrid", Qgis.Info)
-            #boundary = geom.boundary()
-            for pt in geom.vertices():
-                if pt.y() > max_y:
-                    max_y = pt.y()
-                    min_x = pt.x()
-                elif pt.y() == max_y and pt.x() < min_x:
-                    min_x = pt.x()
-            dj_areas.append( (i+1, min_x, max_y) )
-            QgsMessageLog.logMessage("Disjoint polygon {}: min_x = {}, max_y = {}".format(i+1,min_x,max_y), "AtlasGrid", Qgis.Info)
-            merged.updateFeature(f)
+        # Create copy of gridlayer, where all grid cells are shrunk to their net width/height 
+        # to ensure disjoint polygons do not overlap or touch at edges
+        shrink_x = (rwDim[0] - rwDim[2]) / 2
+        shrink_y = (rwDim[1] - rwDim[3]) / 2
+        copyLayer = QgsVectorLayer("Polygon?crs={}".format(self.crs), 'shrunk_cells', "memory")
+        
+        # Resolve the correct enum for Int across PyQt versions
+        META_INT = getattr(QMetaType, 'Int', getattr(QMetaType.Type, 'Int'))
 
-        merged.commitChanges()
+        fields = [
+            QgsField('cellnum', META_INT),
+            QgsField('dj_cellnum', META_INT),
+        ]
 
-        # Sort the list by max_y (descending) and min_x (ascending)
-        dj_areas.sort(key=lambda x: (-x[2], x[1])) 
+        copyLayer.dataProvider().addAttributes(fields)
+        copyLayer.updateFields()
 
-        # Iterate the list, select grid cells within each disjoint polygon and assign the disjoint cell number according to the sorted order
-        cell_idx = 0
-        grid.startEditing()
-        for area in dj_areas:
-            str = "dj_cellnum = {}".format(area[0])
-            request = QgsFeatureRequest(QgsExpression(str))
-            for f in merged.getFeatures(request):
-                geom = f.geometry()
-                # Select grid cells within this geometry
-                str2 = "within($geometry, geom_from_wkt('{}'))".format(geom.asWkt())
-                request2 = QgsFeatureRequest(QgsExpression(str2))
-                for gf in grid.getFeatures(request2):
-                    cell_idx += 1
-                    gf['dj_cellnum'] = cell_idx
-                    grid.updateFeature(gf)
+        copyLayer.startEditing()
 
-        grid.commitChanges()
+        for f in grid.getFeatures():
+            geom = f.geometry().boundingBox()
+            shrunkenCell = QgsRectangle(geom.xMinimum()+shrink_x, geom.yMinimum()+shrink_y, geom.xMaximum()-shrink_x, geom.yMaximum()-shrink_y)
+            shrunkenFeat = QgsFeature(copyLayer.fields())
+            shrunkenFeat.setGeometry(QgsGeometry.fromRect(shrunkenCell))
+            shrunkenFeat["cellnum"] = f["cellnum"]
+            copyLayer.dataProvider().addFeatures([shrunkenFeat])
+        copyLayer.commitChanges()
+
+        # Add layers to layer panel to be able to use them in selections below
+        QgsProject.instance().addMapLayer(copyLayer, False)
+        QgsProject.instance().addMapLayer(merged_unique_aois, False)
+
+        # Select all cells in the copy layer without an assignment in 'dj_cellnum' until all are assigned
+        cellnum = 0
+        f_idx = copyLayer.fields().indexOf("dj_cellnum")
+        copyLayer.selectByExpression('is_empty_or_null(dj_cellnum)', QgsVectorLayer.SetSelection)
+        while copyLayer.selectedFeatureCount() > 0:
+            # Select the first (northwestern most) cell 
+            cell = next(copyLayer.getSelectedFeatures(QgsFeatureRequest().addOrderBy("cellnum", ascending=True)))
+            copyLayer.selectByExpression(f'cellnum = {cell["cellnum"]}')
+
+            # Select alternating aois and cells until the number of cells selected doesn't change
+            cellsSelected = 1
+            continueSelecting = True
+
+            while continueSelecting:
+                alg_params = {
+                        'INPUT': merged_unique_aois,
+                        'PREDICATE': [0],        # 0 = intersects
+                        'INTERSECT': QgsProcessingFeatureSourceDefinition(copyLayer.id(),selectedFeaturesOnly = True),
+                        'METHOD': 1             # add to selection
+                }
+                processing.run('native:selectbylocation', alg_params)
+
+                alg_params = {
+                        'INPUT': copyLayer,
+                        'PREDICATE': [0],        # 0 = intersects
+                        'INTERSECT': QgsProcessingFeatureSourceDefinition(merged_unique_aois.id(),selectedFeaturesOnly = True),
+                        'METHOD': 1             # add to selection
+                }
+                processing.run('native:selectbylocation', alg_params)
+
+                if cellsSelected < copyLayer.selectedFeatureCount():
+                    cellsSelected = copyLayer.selectedFeatureCount()
+                    continueSelecting = True
+                else:
+                    continueSelecting = False
+
+            # All cells selected - start numbering
+            copyLayer.startEditing()
+            for cell in copyLayer.getSelectedFeatures(QgsFeatureRequest().addOrderBy("cellnum", ascending=True)):
+                cellnum += 1
+                cell.setAttribute(f_idx, cellnum)
+                copyLayer.updateFeature(cell)
+            copyLayer.commitChanges()
+
+            copyLayer.selectByExpression('is_empty_or_null(dj_cellnum)', QgsVectorLayer.SetSelection)
+            merged_unique_aois.removeSelection()
+
+        # Copy the value of dj_cellnum from the copyLayer to the grid
+        t_idx = grid.fields().indexOf("dj_cellnum")
+
+        # Collect values to update
+        lookup = {}
+        for f in copyLayer.getFeatures():
+            lookup[f["cellnum"]] = f["dj_cellnum"]
+
+        # Prepare changes
+        changes = {}
+        for f in grid.getFeatures():
+            key = f["cellnum"]
+            changes[f.id()] = {t_idx: lookup[key]}
+
+        # Apply changes in bulk
+        with edit(grid):
+            grid.dataProvider().changeAttributeValues(changes)
+
+        # Remove temporary layers from layer panel
+        QgsProject.instance().removeMapLayers([copyLayer, merged_unique_aois])
 
         return
 
     def identifyCellsToDelete(self,grid,aoi):
+        self.logMessage("Identifying mapsheets to be deleted")
         if self.feedback:
-            self.feedback.pushInfo("Identifying mapsheets to be deleted")
             curr_prog = self.feedback.progress()
         # Generate line layer from grid polygons
         lines = processing.run("native:polygonstolines", {'INPUT':grid,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=self.feedback)['OUTPUT']
 
         # Split polygons by lines
+        self.logMessage("Splitting grid")
         if self.feedback:
             prog_step = int((100-curr_prog)/5)
             self.feedback.setProgress(curr_prog + prog_step)
-            self.feedback.pushInfo("Splitting grid")
         split = processing.run('native:splitwithlines', {'INPUT':grid,'LINES':lines, 'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=self.feedback)['OUTPUT']
 
         # Add the split layer temporarily to the project (to be able to reference it in a field calculator expression)
         QgsProject.instance().addMapLayer(split, addToLegend=False)
         split.setName('split')
-        splitToDelete = split
 
         # Use field calculator to determine which cells overlap each other
+        self.logMessage("Calculating overlap")
         if self.feedback:
             self.feedback.setProgress(curr_prog + (2*prog_step))
-            self.feedback.pushInfo("Calculating overlap")
 
         alg_params = {
             'FIELD_LENGTH': 20,
@@ -226,9 +300,9 @@ class GridCreator():
         QgsProject.instance().addMapLayer(proj_aoi, addToLegend=False)
 
         # Use field calculator to determine which cells to keep initially
+        self.logMessage("Locating sheets to keep")
         if self.feedback:
             self.feedback.setProgress(curr_prog + (3*prog_step))
-            self.feedback.pushInfo("Calculating sheets to keep")
         alg_params = {
             'FIELD_LENGTH': 0,
             'FIELD_NAME': 'keep',
@@ -241,9 +315,9 @@ class GridCreator():
         split = processing.run('native:fieldcalculator', alg_params, feedback=self.feedback)['OUTPUT']
 
         # Check for intersection in the overlaps
+        self.logMessage("Checking for intersections in the overlaps")
         if self.feedback:
             self.feedback.setProgress(curr_prog + (4*prog_step))
-            self.feedback.pushInfo("Checking for intersections in the overlaps")
         split.startEditing()
         for f in split.getFeatures():
             overlaps = f["overlaps"].split(',') if f["overlaps"] else []
@@ -268,7 +342,7 @@ class GridCreator():
             toBeDeleted.append(f["cellname"])
 
         # Remove the temporary layer again
-        QgsProject.instance().removeMapLayer(splitToDelete)
+        QgsProject.instance().removeMapLayer(split)
         QgsProject.instance().removeMapLayer(proj_aoi)
 
         return toBeDeleted
@@ -285,4 +359,5 @@ class GridCreator():
         proj_aoi = processing.run('native:reprojectlayer', alg_params)['OUTPUT']
         QgsProject.instance().addMapLayer(proj_aoi, addToLegend=False)
         return proj_aoi
+
 

@@ -214,11 +214,11 @@ class AtlasGrid:
         # show the dialog
         self.dlg.show()   #exec_()   #show()
         # Run the dialog event loop
-        result = self.dlg.exec_()
+        result = self.dlg.exec()
         # See if OK was pressed
         if result:
             try:
-                QApplication.setOverrideCursor(Qt.WaitCursor)
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                 gridLayer = self.gridCreator.createGrid(self.dlg.mapScale,self.dlg.gridExtent,self.dlg.rwDimensions,self.dlg.nRowsAndCols,self.dlg.chkboxDeleteNonIntersecting.isChecked(),self.dlg.cmbAOILayer.currentLayer())
                 QgsProject.instance().addMapLayer(gridLayer)
 
