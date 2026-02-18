@@ -43,6 +43,10 @@ Cells are numbered from west to east starting with the northernmost row of cells
 
 ![map](./images/cellname_vs_cellnums.png)
 
+From version 2.1 there has been introduced a third cell numbering method aimed at securing consecutive numbers within each AOI, when having an AOI layer consisting of disjoint polygons, and where you check the "Delete mapsheets not intersecting the area of interest" checkbox. The new attribute 'dj_cellnum' will contain consecutive numbers starting with the northwestern most AOI, numbering all cells within this area, before continuing with the next AOI (see illustration below).
+
+![map](./images/dj_cellnumbering.png)
+
 ## Plotting an atlas
 
 Now you are ready to complete your atlas setup. The steps above require at least a layout with a map item having already been created. All that remains is to set the newly generated grid as the coverage layer for your atlas and enable the atlas preview.
