@@ -259,6 +259,7 @@ class GridCreator():
 
     def identifyCellsToDelete(self,grid,aoi):
         self.logMessage("Identifying mapsheets to be deleted")
+        debug = False
         if self.feedback:
             curr_prog = self.feedback.progress()
         # Generate line layer from grid polygons
@@ -269,11 +270,11 @@ class GridCreator():
         if self.feedback:
             prog_step = int((100-curr_prog)/5)
             self.feedback.setProgress(curr_prog + prog_step)
-        split = processing.run('native:splitwithlines', {'INPUT':grid,'LINES':lines, 'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=self.feedback)['OUTPUT']
+        split_temp = processing.run('native:splitwithlines', {'INPUT':grid,'LINES':lines, 'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=self.feedback)['OUTPUT']
 
         # Add the split layer temporarily to the project (to be able to reference it in a field calculator expression)
-        QgsProject.instance().addMapLayer(split, addToLegend=False)
-        split.setName('split')
+        QgsProject.instance().addMapLayer(split_temp, addToLegend=debug)
+        split_temp.setName('split')
 
         # Use field calculator to determine which cells overlap each other
         self.logMessage("Calculating overlap")
@@ -285,8 +286,8 @@ class GridCreator():
             'FIELD_NAME': 'overlaps',
             'FIELD_PRECISION': 0,
             'FIELD_TYPE': 2,  # Text
-            'FORMULA': "array_to_string(array_sort( aggregate( layer:= '{}', aggregate:='array_agg', expression:=cellname, filter:=contains($geometry, geometry(@parent)))))".format(split.name()),
-            'INPUT': split,
+            'FORMULA': "array_to_string(array_sort( aggregate( layer:= '{}', aggregate:='array_agg', expression:=cellname, filter:=contains($geometry, geometry(@parent)))))".format(split_temp.name()),
+            'INPUT': split_temp,
             'OUTPUT': 'TEMPORARY_OUTPUT'
         }
         split = processing.run('native:fieldcalculator', alg_params, feedback=self.feedback)['OUTPUT']
@@ -297,7 +298,7 @@ class GridCreator():
             proj_aoi = self.reprojectAOI(aoi,grid.crs().authid())
         else:
             proj_aoi = aoi.materialize(QgsFeatureRequest().setFilterFids(aoi.allFeatureIds()))
-        QgsProject.instance().addMapLayer(proj_aoi, addToLegend=False)
+        QgsProject.instance().addMapLayer(proj_aoi, addToLegend=debug)
 
         # Use field calculator to determine which cells to keep initially
         self.logMessage("Locating sheets to keep")
@@ -342,8 +343,11 @@ class GridCreator():
             toBeDeleted.append(f["cellname"])
 
         # Remove the temporary layer again
-        QgsProject.instance().removeMapLayer(split)
-        QgsProject.instance().removeMapLayer(proj_aoi)
+        if not debug:
+            QgsProject.instance().removeMapLayer(split_temp)
+            QgsProject.instance().removeMapLayer(proj_aoi)
+
+        self.logMessage(f"Cells to be deleted: {toBeDeleted}")
 
         return toBeDeleted
 

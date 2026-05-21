@@ -25,8 +25,7 @@ import os.path
 from qgis.PyQt.QtCore import Qt, QSettings, QTranslator, QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QApplication
-from qgis.core import Qgis, QgsApplication, QgsProject, QgsFeature
-from qgis import processing
+from qgis.core import QgsApplication, QgsProject
 from .grid import GridCreator
 
 # Import the code for the processing plugin
