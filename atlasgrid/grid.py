@@ -257,111 +257,202 @@ class GridCreator():
 
         return
 
-    def identifyCellsToDelete(self,grid,aoi):
+    def identifyCellsToDelete(self, grid, aoi):
+        """Return the list of cellnames whose mapsheets do not need to be kept.
+
+        A mapsheet is kept if any part of it intersects the AOI. Where two or
+        more overlapping sheets share the AOI *only* in their mutual overlap
+        region, a single representative sheet is retained instead of all of
+        them.
+
+        This implementation is deliberately independent of the runtime
+        environment:
+          * temporary layers are referenced inside expressions by *id*, never
+            by name, so a layer the user happens to have called "split" can no
+            longer be picked up by the aggregate() calls;
+          * the AOI/grid CRS comparison uses the CRS objects (an empty authid
+            on a custom CRS no longer defeats the reprojection);
+          * cell membership of each split piece is decided with an interior
+            point rather than polygon-in-polygon containment, which removes the
+            dependency on the exact GEOS version / coordinate precision;
+          * every keep/delete decision is made in plain Python on values read
+            once, so there is no editing-while-iterating and no reliance on
+            provider-specific feature ordering;
+          * temporary layers are removed in a finally block, so a failure
+            partway through can no longer leak layers into the project (which
+            previously caused name clashes on the next run).
+        """
         self.logMessage("Identifying mapsheets to be deleted")
         debug = False
-        if self.feedback:
-            curr_prog = self.feedback.progress()
-        # Generate line layer from grid polygons
-        lines = processing.run("native:polygonstolines", {'INPUT':grid,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=self.feedback)['OUTPUT']
+        project = QgsProject.instance()
 
-        # Split polygons by lines
-        self.logMessage("Splitting grid")
-        if self.feedback:
-            prog_step = int((100-curr_prog)/5)
-            self.feedback.setProgress(curr_prog + prog_step)
-        split_temp = processing.run('native:splitwithlines', {'INPUT':grid,'LINES':lines, 'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=self.feedback)['OUTPUT']
+        curr_prog = self.feedback.progress() if self.feedback else 0
+        prog_step = int((100 - curr_prog) / 5) if self.feedback else 0
 
-        # Add the split layer temporarily to the project (to be able to reference it in a field calculator expression)
-        QgsProject.instance().addMapLayer(split_temp, addToLegend=debug)
-        split_temp.setName('split')
+        # Layers pushed into the project so they can be resolved by id inside
+        # expression aggregates. Tracked here for guaranteed cleanup.
+        temp_project_layers = []
 
-        # Use field calculator to determine which cells overlap each other
-        self.logMessage("Calculating overlap")
-        if self.feedback:
-            self.feedback.setProgress(curr_prog + (2*prog_step))
+        def _is_null(v):
+            return v is None or (isinstance(v, QVariant) and v.isNull())
 
-        alg_params = {
-            'FIELD_LENGTH': 20,
-            'FIELD_NAME': 'overlaps',
-            'FIELD_PRECISION': 0,
-            'FIELD_TYPE': 2,  # Text
-            'FORMULA': "array_to_string(array_sort( aggregate( layer:= '{}', aggregate:='array_agg', expression:=cellname, filter:=contains($geometry, geometry(@parent)))))".format(split_temp.name()),
-            'INPUT': split_temp,
-            'OUTPUT': 'TEMPORARY_OUTPUT'
-        }
-        split = processing.run('native:fieldcalculator', alg_params, feedback=self.feedback)['OUTPUT']
+        def _as_bool(v):
+            # Booleans round-trip as real bools on memory layers but can come
+            # back as 0/1 (or NULL) on OGR/GeoPackage temporary outputs, so
+            # normalise defensively.
+            if _is_null(v):
+                return False
+            return str(v).strip().lower() in ('1', 'true', 't')
 
-        # Are grid and aoi in the same reference system?
-        if grid.crs().authid() != aoi.crs().authid():
-            projected = True
-            proj_aoi = self.reprojectAOI(aoi,grid.crs().authid())
-        else:
-            proj_aoi = aoi.materialize(QgsFeatureRequest().setFilterFids(aoi.allFeatureIds()))
-        QgsProject.instance().addMapLayer(proj_aoi, addToLegend=debug)
+        def _as_list(v):
+            if _is_null(v):
+                return []
+            s = str(v).strip()
+            if s == '' or s.upper() == 'NULL':
+                return []
+            return [p for p in s.split(',') if p != '']
 
-        # Use field calculator to determine which cells to keep initially
-        self.logMessage("Locating sheets to keep")
-        if self.feedback:
-            self.feedback.setProgress(curr_prog + (3*prog_step))
-        alg_params = {
-            'FIELD_LENGTH': 0,
-            'FIELD_NAME': 'keep',
-            'FIELD_PRECISION': 0,
-            'FIELD_TYPE': 6,  # Boolean
-            'FORMULA': "aggregate( layer:= '{}', aggregate:='count', expression:=@id, filter:=intersects($geometry, geometry(@parent))) > 0".format(proj_aoi.id()),
-            'INPUT': split,
-            'OUTPUT': 'TEMPORARY_OUTPUT'
-        }
-        split = processing.run('native:fieldcalculator', alg_params, feedback=self.feedback)['OUTPUT']
+        try:
+            # 1. Grid boundaries as a line layer.
+            lines = processing.run(
+                "native:polygonstolines",
+                {'INPUT': grid, 
+                 'OUTPUT': 'TEMPORARY_OUTPUT'},
+                feedback=self.feedback)['OUTPUT']
 
-        # Check for intersection in the overlaps
-        self.logMessage("Checking for intersections in the overlaps")
-        if self.feedback:
-            self.feedback.setProgress(curr_prog + (4*prog_step))
-        split.startEditing()
-        for f in split.getFeatures():
-            overlaps = f["overlaps"].split(',') if f["overlaps"] else []
-            if f["keep"] and len(overlaps)>1:
-                str = "cellname in ({}) and cellname = overlaps".format(','.join("'{}'".format(o) for o in overlaps))
-                request = QgsFeatureRequest(QgsExpression(str))
-                alreadyKept = False
-                for o in split.getFeatures(request):
-                    if o["keep"]:
-                        alreadyKept = True
-                
-                if not alreadyKept:
-                    o["keep"] = True
-                    split.updateFeature(o)
-                    
-        split.commitChanges()
+            # 2. Split every cell along all boundary lines, so overlap regions become their own pieces.
+            self.logMessage("Splitting grid")
+            if self.feedback:
+                self.feedback.setProgress(curr_prog + prog_step)
+            split_base = processing.run(
+                'native:splitwithlines',
+                {'INPUT': grid, 
+                 'LINES': lines, 
+                 'OUTPUT': 'TEMPORARY_OUTPUT'},
+                feedback=self.feedback)['OUTPUT']
+            split_base.setName('atlasgrid_split')
 
-        str = "cellname = overlaps and not keep"
-        request = QgsFeatureRequest(QgsExpression(str))
-        toBeDeleted = []
-        for f in split.getFeatures(request):
-            toBeDeleted.append(f["cellname"])
+            # Must be in the project to be resolvable by id inside aggregate().
+            project.addMapLayer(split_base, addToLegend=debug)
+            temp_project_layers.append(split_base)
 
-        # Remove the temporary layer again
-        if not debug:
-            QgsProject.instance().removeMapLayer(split_temp)
-            QgsProject.instance().removeMapLayer(proj_aoi)
+            # 3. For each piece, build the sorted list of cells that cover it.
+            #    Testing containment of an interior point (point_on_surface)
+            #    rather than the whole polygon avoids GEOS edge-precision
+            #    differences between installations.
+            self.logMessage("Calculating overlap")
+            if self.feedback:
+                self.feedback.setProgress(curr_prog + (2 * prog_step))
+            overlaps_formula = (
+                "array_to_string(array_sort(aggregate("
+                "layer:='{lid}',"
+                "aggregate:='array_agg',"
+                "expression:=\"cellname\","
+                "filter:=contains($geometry, point_on_surface(geometry(@parent)))"
+                ")))"
+            ).format(lid=split_base.id())
+            alg_params = {
+                'FIELD_LENGTH': 20,
+                'FIELD_NAME': 'overlaps',
+                'FIELD_PRECISION': 0,
+                'FIELD_TYPE': 2,  # Text
+                'FORMULA': overlaps_formula,
+                'INPUT': split_base,
+                'OUTPUT': 'TEMPORARY_OUTPUT'
+            }
+            split = processing.run('native:fieldcalculator', alg_params, feedback=self.feedback)['OUTPUT']
 
-        self.logMessage(f"Cells to be deleted: {toBeDeleted}")
+            # 4. Make sure the AOI is in the grid CRS. Compare the CRS objects
+            #    rather than authids (which may be empty for custom CRSs).
+            if grid.crs() != aoi.crs():
+                self.logMessage("Reprojecting AOI to grid CRS")
+                proj_aoi = processing.run(
+                    'native:reprojectlayer',
+                    {'INPUT': aoi,
+                     'TARGET_CRS': grid.crs(),
+                     'CONVERT_CURVED_GEOMETRIES': False,
+                     'OPERATION': '',
+                     'OUTPUT': 'TEMPORARY_OUTPUT'})['OUTPUT']
+            else:
+                proj_aoi = aoi.materialize(QgsFeatureRequest().setFilterFids(aoi.allFeatureIds()))
+            proj_aoi.setName('atlasgrid_aoi')
+            project.addMapLayer(proj_aoi, addToLegend=debug)
+            temp_project_layers.append(proj_aoi)
 
-        return toBeDeleted
+            # 5. Flag pieces that intersect the AOI (AOI referenced by id).
+            self.logMessage("Locating sheets to keep")
+            if self.feedback:
+                self.feedback.setProgress(curr_prog + (3 * prog_step))
+            keep_formula = (
+                "aggregate("
+                "layer:='{lid}',"
+                "aggregate:='count',"
+                "expression:=$id,"
+                "filter:=intersects($geometry, geometry(@parent))"
+                ") > 0"
+            ).format(lid=proj_aoi.id())
+            alg_params = {
+                'FIELD_LENGTH': 0,
+                'FIELD_NAME': 'keep',
+                'FIELD_PRECISION': 0,
+                'FIELD_TYPE': 6,  # Boolean
+                'FORMULA': keep_formula,
+                'INPUT': split,
+                'OUTPUT': 'TEMPORARY_OUTPUT'
+            }
+            split = processing.run('native:fieldcalculator', alg_params, feedback=self.feedback)['OUTPUT']
 
-    def reprojectAOI(self,aoi,targetCrs):
-        # Reproject layer
-        alg_params = {
-            'CONVERT_CURVED_GEOMETRIES': False,
-            'INPUT': aoi,
-            'OPERATION': '',
-            'TARGET_CRS': QgsCoordinateReferenceSystem(targetCrs),
-            'OUTPUT': 'TEMPORARY_OUTPUT'
-        }
-        proj_aoi = processing.run('native:reprojectlayer', alg_params)['OUTPUT']
-        QgsProject.instance().addMapLayer(proj_aoi, addToLegend=False)
-        return proj_aoi
+            # 6. Read everything into plain Python. From here the decision logic
+            #    is fully deterministic and provider-independent.
+            self.logMessage("Checking for intersections in the overlaps")
+            if self.feedback:
+                self.feedback.setProgress(curr_prog + (4 * prog_step))
 
+            pieces = []            # list of (cellname, overlaps_list, keep_bool)
+            cells_with_core = set()
+            kept_core = {}         # cellname -> bool (does the cell survive?)
+
+            for f in split.getFeatures():
+                cellname = f['cellname']
+                if _is_null(cellname):
+                    continue
+                cellname = str(cellname)
+                overlaps = _as_list(f['overlaps'])
+                keep = _as_bool(f['keep'])
+                pieces.append((cellname, overlaps, keep))
+
+                # A "core" piece is one covered only by its own cell.
+                if overlaps == [cellname]:
+                    cells_with_core.add(cellname)
+                    if keep:
+                        kept_core[cellname] = True
+                    else:
+                        kept_core.setdefault(cellname, False)
+
+            # 7. For every AOI-intersecting overlap region, make sure at least
+            #    one covering sheet is retained. Regions are processed in a
+            #    stable sorted order and the alphabetically first cell is chosen
+            #    as the representative.
+            overlap_regions = sorted(
+                {tuple(ov) for (cn, ov, kp) in pieces if kp and len(ov) > 1}
+            )
+            for region in overlap_regions:
+                if any(kept_core.get(c, False) for c in region):
+                    continue
+                candidates = [c for c in region if c in cells_with_core] or list(region)
+                representative = sorted(candidates)[0]
+                kept_core[representative] = True
+
+            # 8. Any cell that has a core piece but is still not kept is deleted.
+            toBeDeleted = sorted(
+                cell for cell in cells_with_core if not kept_core.get(cell, False)
+            )
+
+            self.logMessage("Cells to be deleted: {}".format(toBeDeleted))
+            return toBeDeleted
+
+        finally:
+            # Guaranteed cleanup, even if a processing step raised.
+            if not debug and temp_project_layers:
+                project.removeMapLayers([lyr.id() for lyr in temp_project_layers])
 
